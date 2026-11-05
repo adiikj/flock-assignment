@@ -1,0 +1,434 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Urja Meter API",
+    "version": "1.0.0",
+    "description": "Read-only API over the Urja Meter Ops portal. Meter and network data are synced from the portal's bulk export into a local snapshot; readings are fetched on demand and cached. See PROTOCOL.md for how the portal itself works."
+  },
+  "servers": [{ "url": "http://localhost:3000" }],
+  "tags": [
+    { "name": "meters" },
+    { "name": "network", "description": "Transformers, hierarchy and data quality" },
+    { "name": "system" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["system"],
+        "summary": "Service health and last sync time",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } } }
+        }
+      }
+    },
+    "/v1/meters": {
+      "get": {
+        "tags": ["meters"],
+        "summary": "List and filter meters",
+        "description": "All list filters accept comma-separated values and are case-insensitive. Hierarchy filters match on codes (e.g. feeder=F-001). When lat/lng are given, results include distanceKm and are sorted nearest first.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Q" },
+          { "$ref": "#/components/parameters/Status" },
+          { "$ref": "#/components/parameters/Make" },
+          { "$ref": "#/components/parameters/Phase" },
+          { "$ref": "#/components/parameters/InstallType" },
+          { "$ref": "#/components/parameters/Build" },
+          { "$ref": "#/components/parameters/Zone" },
+          { "$ref": "#/components/parameters/Circle" },
+          { "$ref": "#/components/parameters/Division" },
+          { "$ref": "#/components/parameters/Subdivision" },
+          { "$ref": "#/components/parameters/Substation" },
+          { "$ref": "#/components/parameters/Feeder" },
+          { "$ref": "#/components/parameters/Dt" },
+          { "$ref": "#/components/parameters/Lat" },
+          { "$ref": "#/components/parameters/Lng" },
+          { "$ref": "#/components/parameters/RadiusKm" },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/Offset" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching meters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Meter" } },
+                    "page": { "$ref": "#/components/schemas/Page" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    },
+    "/v1/meters/{meterId}": {
+      "get": {
+        "tags": ["meters"],
+        "summary": "One meter, with its transformer and any data-quality issues",
+        "parameters": [{ "$ref": "#/components/parameters/MeterId" }],
+        "responses": {
+          "200": {
+            "description": "Meter",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/MeterDetail" } } } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    },
+    "/v1/meters/{meterId}/readings": {
+      "get": {
+        "tags": ["meters"],
+        "summary": "Half-hourly readings with derived consumption",
+        "description": "The portal only holds about the last 7 days of readings per meter and accepts no date range; from/to filter within that window. kwhDelta is consumption since the previous reading (the portal sends cumulative registers).",
+        "parameters": [
+          { "$ref": "#/components/parameters/MeterId" },
+          { "$ref": "#/components/parameters/From" },
+          { "$ref": "#/components/parameters/To" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Readings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "meterId": { "type": "string" },
+                        "summary": { "$ref": "#/components/schemas/ReadingSummary" },
+                        "readings": { "type": "array", "items": { "$ref": "#/components/schemas/Interval" } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "502": { "$ref": "#/components/responses/PortalUnavailable" },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    },
+    "/v1/transformers": {
+      "get": {
+        "tags": ["network"],
+        "summary": "List distribution transformers",
+        "parameters": [{ "$ref": "#/components/parameters/Feeder" }],
+        "responses": {
+          "200": {
+            "description": "Transformers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Transformer" } },
+                    "page": { "type": "object", "properties": { "total": { "type": "integer" } } }
+                  }
+                }
+              }
+            }
+          },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    },
+    "/v1/transformers/{code}": {
+      "get": {
+        "tags": ["network"],
+        "summary": "One transformer with its meters and status breakdown",
+        "parameters": [{ "$ref": "#/components/parameters/DtCode" }],
+        "responses": {
+          "200": {
+            "description": "Transformer",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/TransformerDetail" } } } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    },
+    "/v1/hierarchy": {
+      "get": {
+        "tags": ["network"],
+        "summary": "Network tree: zone → circle → division → subdivision → substation → feeder → dt",
+        "description": "Keyed by full path. Some codes (e.g. D-01) appear under several parents in the portal's data; they appear as separate nodes here and are listed under /v1/data-quality as multiple_parents.",
+        "parameters": [{ "$ref": "#/components/parameters/Depth" }],
+        "responses": {
+          "200": {
+            "description": "Tree",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/TreeNode" } } } } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    },
+    "/v1/data-quality": {
+      "get": {
+        "tags": ["network"],
+        "summary": "Repairs, conflicts and inconsistencies found in the portal's data",
+        "parameters": [{ "$ref": "#/components/parameters/IssueType" }],
+        "responses": {
+          "200": {
+            "description": "Issues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "summary": { "type": "object", "additionalProperties": { "type": "integer" } },
+                        "issues": { "type": "array", "items": { "$ref": "#/components/schemas/DataIssue" } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    },
+    "/v1/stats": {
+      "get": {
+        "tags": ["network"],
+        "summary": "Fleet-wide counts by status, make, phase, install type and build",
+        "responses": {
+          "200": {
+            "description": "Stats",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Stats" } } } } }
+          },
+          "503": { "$ref": "#/components/responses/NotReady" }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Q": { "name": "q", "in": "query", "description": "Substring match on meter ID or serial number", "schema": { "type": "string" }, "example": "J1000" },
+      "Status": { "name": "status", "in": "query", "description": "installed, faulty, decommissioned", "schema": { "type": "string" }, "example": "faulty,decommissioned" },
+      "Make": { "name": "make", "in": "query", "schema": { "type": "string" }, "example": "genus" },
+      "Phase": { "name": "phase", "in": "query", "description": "single, three", "schema": { "type": "string" } },
+      "InstallType": { "name": "installType", "in": "query", "description": "whole current, ct operated", "schema": { "type": "string" } },
+      "Build": { "name": "build", "in": "query", "description": "legacy, v2", "schema": { "type": "string" } },
+      "Zone": { "name": "zone", "in": "query", "schema": { "type": "string" }, "example": "Z-01" },
+      "Circle": { "name": "circle", "in": "query", "schema": { "type": "string" }, "example": "C-01" },
+      "Division": { "name": "division", "in": "query", "schema": { "type": "string" }, "example": "D-01" },
+      "Subdivision": { "name": "subdivision", "in": "query", "schema": { "type": "string" }, "example": "SD-01" },
+      "Substation": { "name": "substation", "in": "query", "schema": { "type": "string" }, "example": "SS-01" },
+      "Feeder": { "name": "feeder", "in": "query", "schema": { "type": "string" }, "example": "F-001" },
+      "Dt": { "name": "dt", "in": "query", "schema": { "type": "string" }, "example": "DT-007" },
+      "Lat": { "name": "lat", "in": "query", "schema": { "type": "number", "minimum": -90, "maximum": 90 }, "example": 26.9124 },
+      "Lng": { "name": "lng", "in": "query", "schema": { "type": "number", "minimum": -180, "maximum": 180 }, "example": 75.7873 },
+      "RadiusKm": { "name": "radiusKm", "in": "query", "description": "Requires lat and lng", "schema": { "type": "number", "minimum": 0, "maximum": 100 }, "example": 2 },
+      "Limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 } },
+      "Offset": { "name": "offset", "in": "query", "schema": { "type": "integer", "minimum": 0, "default": 0 } },
+      "MeterId": { "name": "meterId", "in": "path", "required": true, "schema": { "type": "string" }, "example": "J100031" },
+      "DtCode": { "name": "code", "in": "path", "required": true, "schema": { "type": "string" }, "example": "DT-007" },
+      "From": { "name": "from", "in": "query", "schema": { "type": "string", "format": "date-time" }, "example": "2026-06-30T00:00:00+05:30" },
+      "To": { "name": "to", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+      "Depth": { "name": "depth", "in": "query", "description": "Levels to include (1 = zones only)", "schema": { "type": "integer", "minimum": 1, "maximum": 7 } },
+      "IssueType": { "name": "type", "in": "query", "description": "Comma-separated issue types", "schema": { "type": "string" }, "example": "multiple_parents" }
+    },
+    "responses": {
+      "BadRequest": { "description": "Invalid query parameter", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotReady": { "description": "Initial sync from the portal not finished", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "PortalUnavailable": { "description": "The upstream portal failed or is unreachable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "NodeRef": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string", "nullable": true, "example": "F-001" },
+          "name": { "type": "string", "nullable": true, "example": "Feeder 1" }
+        }
+      },
+      "Hierarchy": {
+        "type": "object",
+        "properties": {
+          "zone": { "$ref": "#/components/schemas/NodeRef" },
+          "circle": { "$ref": "#/components/schemas/NodeRef" },
+          "division": { "$ref": "#/components/schemas/NodeRef" },
+          "subdivision": { "$ref": "#/components/schemas/NodeRef" },
+          "substation": { "$ref": "#/components/schemas/NodeRef" },
+          "feeder": { "$ref": "#/components/schemas/NodeRef" },
+          "dt": { "$ref": "#/components/schemas/NodeRef" }
+        }
+      },
+      "Location": {
+        "type": "object",
+        "properties": { "lat": { "type": "number" }, "lng": { "type": "number" } }
+      },
+      "Meter": {
+        "type": "object",
+        "properties": {
+          "meterId": { "type": "string", "example": "J100031" },
+          "serialNo": { "type": "string", "nullable": true, "example": "AL32944" },
+          "make": { "type": "string", "nullable": true, "example": "Genus" },
+          "phaseType": { "type": "string", "nullable": true, "enum": ["single", "three"] },
+          "installStatus": { "type": "string", "nullable": true, "enum": ["Installed", "Faulty", "Decommissioned"] },
+          "installType": { "type": "string", "nullable": true, "example": "Whole Current" },
+          "build": { "type": "string", "nullable": true, "example": "legacy" },
+          "dtCode": { "type": "string", "nullable": true, "example": "DT-032" },
+          "hierarchy": { "$ref": "#/components/schemas/Hierarchy" },
+          "location": { "nullable": true, "allOf": [{ "$ref": "#/components/schemas/Location" }] },
+          "distanceKm": { "type": "number", "description": "Only present when lat/lng were given" }
+        }
+      },
+      "MeterDetail": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Meter" },
+          {
+            "type": "object",
+            "properties": {
+              "transformer": { "nullable": true, "allOf": [{ "$ref": "#/components/schemas/Transformer" }] },
+              "issues": { "type": "array", "items": { "$ref": "#/components/schemas/DataIssue" } }
+            }
+          }
+        ]
+      },
+      "Transformer": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string", "example": "DT-007" },
+          "name": { "type": "string", "nullable": true, "example": "Sanganer DT 7" },
+          "aliases": { "type": "array", "items": { "type": "string" }, "example": ["Old Malviya Nagar Xfmr"] },
+          "feederCode": { "type": "string", "nullable": true, "example": "F-007" },
+          "capacityKva": { "type": "number", "nullable": true, "example": 63 },
+          "meterCount": { "type": "integer", "example": 13 }
+        }
+      },
+      "TransformerDetail": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Transformer" },
+          {
+            "type": "object",
+            "properties": {
+              "statusCounts": { "type": "object", "additionalProperties": { "type": "integer" } },
+              "meters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "meterId": { "type": "string" },
+                    "serialNo": { "type": "string", "nullable": true },
+                    "make": { "type": "string", "nullable": true },
+                    "phaseType": { "type": "string", "nullable": true },
+                    "installStatus": { "type": "string", "nullable": true }
+                  }
+                }
+              },
+              "issues": { "type": "array", "items": { "$ref": "#/components/schemas/DataIssue" } }
+            }
+          }
+        ]
+      },
+      "TreeNode": {
+        "type": "object",
+        "properties": {
+          "level": { "type": "string", "enum": ["zone", "circle", "division", "subdivision", "substation", "feeder", "dt"] },
+          "code": { "type": "string", "nullable": true },
+          "name": { "type": "string", "nullable": true },
+          "meterCount": { "type": "integer" },
+          "children": { "type": "array", "items": { "$ref": "#/components/schemas/TreeNode" } }
+        }
+      },
+      "DataIssue": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "blank_code_repaired", "blank_code_unresolved", "blank_name_repaired", "name_conflict",
+              "multiple_parents", "dt_code_mismatch", "invalid_location", "dt_not_in_master", "feeder_mismatch"
+            ]
+          },
+          "entity": { "type": "string", "example": "meter:J100011" },
+          "detail": { "type": "string" }
+        }
+      },
+      "Interval": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time", "example": "2026-06-24T00:00:00+05:30" },
+          "kwh": { "type": "number", "nullable": true, "description": "Cumulative register" },
+          "kvah": { "type": "number", "nullable": true, "description": "Cumulative register" },
+          "voltageR": { "type": "number", "nullable": true },
+          "kwhDelta": { "type": "number", "nullable": true, "description": "Consumption since previous reading" },
+          "kvahDelta": { "type": "number", "nullable": true },
+          "powerFactor": { "type": "number", "nullable": true },
+          "flags": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["kwh_register_decreased", "kvah_register_decreased", "irregular_interval", "voltage_out_of_range"] }
+          }
+        }
+      },
+      "ReadingSummary": {
+        "type": "object",
+        "properties": {
+          "readingCount": { "type": "integer" },
+          "firstReadingAt": { "type": "string", "format": "date-time", "nullable": true },
+          "lastReadingAt": { "type": "string", "format": "date-time", "nullable": true },
+          "totalKwh": { "type": "number" },
+          "peakIntervalKwh": { "type": "number", "nullable": true },
+          "voltageR": {
+            "type": "object",
+            "nullable": true,
+            "properties": { "min": { "type": "number" }, "max": { "type": "number" }, "avg": { "type": "number" } }
+          },
+          "flaggedIntervals": { "type": "integer" }
+        }
+      },
+      "Stats": {
+        "type": "object",
+        "properties": {
+          "syncedAt": { "type": "string", "format": "date-time" },
+          "meters": { "type": "integer" },
+          "transformers": { "type": "integer" },
+          "byStatus": { "type": "object", "additionalProperties": { "type": "integer" } },
+          "byMake": { "type": "object", "additionalProperties": { "type": "integer" } },
+          "byPhase": { "type": "object", "additionalProperties": { "type": "integer" } },
+          "byInstallType": { "type": "object", "additionalProperties": { "type": "integer" } },
+          "byBuild": { "type": "object", "additionalProperties": { "type": "integer" } },
+          "serialPrefixByMake": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": { "type": "integer" } } }
+        }
+      },
+      "Page": {
+        "type": "object",
+        "properties": { "total": { "type": "integer" }, "limit": { "type": "integer" }, "offset": { "type": "integer" } }
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "starting"] },
+          "syncedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "meters": { "type": "integer" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": { "code": { "type": "string", "example": "not_found" }, "message": { "type": "string" } }
+          }
+        }
+      }
+    }
+  }
+}
